@@ -46,7 +46,7 @@ job and it should succeed and upload the container without issue.
 You can then pull and run the container from your repository as follows:
 
 ```bash
-$ docker run -it <MyDockerHubUsername>/invoicer
+$ docker run -it <MyDockerHubUsername>/invoicer or <MyDockerHubUsername>/invoicer-chapter2 (whatever you named it)
 ```
 
 Build the AWS infrastructure
