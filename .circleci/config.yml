@@ -12,11 +12,12 @@ jobs:
       - setup_remote_docker
 
       - run: echo 'export DOCKER_REPO="$(if [ ${CIRCLE_PROJECT_USERNAME} == 'Securing-DevOps' ]; then echo securingdevops; else echo $DOCKER_USER; fi)"' >> $BASH_ENV
+      - run: echo 'export GOFLAGS=-mod=mod' >> $BASH_ENV
 
       - run:
           name: Build application container
           command: |
-            go build -o bin/invoicer --ldflags '-extldflags "-static"' .;
+            CGO_ENABLED=1 go build -o bin/invoicer --ldflags '-extldflags "-static"' -tags netgo .;
             docker build -t ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME} .;
 
       - run:
@@ -40,7 +41,7 @@ jobs:
 
       - run:
           name: Verify dependencies
-          command: go mod tidy && git diff --quiet go.mod go.sum
+          command: go mod tidy && git diff --quiet go.mod
 
       - deploy:
           # Push application container to dockerhub
@@ -48,7 +49,7 @@ jobs:
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
                 docker login -u ${DOCKER_USER} -p ${DOCKER_PASS};
                 echo ${DOCKER_USER}/${CIRCLE_PROJECT_REPONAME}:${CIRCLE_TAG};
-                go build -o bin/invoicer --ldflags '-extldflags "-static"' .;
+                CGO_ENABLED=1 go build -o bin/invoicer --ldflags '-extldflags "-static"' -tags netgo .;
                 docker build -t ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME} .;
                 docker images --no-trunc | awk '/^app/ {print $3}' | sudo tee $CIRCLE_ARTIFACTS/docker-image-shasum256.txt;
                 docker push ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME};
