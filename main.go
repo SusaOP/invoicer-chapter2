@@ -27,15 +27,8 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/postgres"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 	"github.com/wader/gormstore"
-	"go.mozilla.org/mozlog"
 	"golang.org/x/oauth2"
 )
-
-func init() {
-	// initialize the logger
-	mozlog.Logger.LoggerName = "invoicer"
-	log.SetFlags(0)
-}
 
 type invoicer struct {
 	db    *gorm.DB
@@ -65,7 +58,7 @@ func main() {
 		panic("failed to connect database")
 	}
 
-	// session store
+	// initialize the session store
 	iv.store = gormstore.New(db, CSRFKey)
 	quit := make(chan struct{})
 	go iv.store.PeriodicCleanup(1*time.Hour, quit)
@@ -92,19 +85,16 @@ func main() {
 	r.HandleFunc("/invoice/delete/{id:[0-9]+}", iv.deleteInvoice).Methods("GET")
 	r.HandleFunc("/__version__", getVersion).Methods("GET")
 
+	r.HandleFunc("/authenticate", iv.getAuthenticate).Methods("GET")
+	r.HandleFunc("/oauth2callback", iv.getOAuth2Callback).Methods("GET")
+
 	// handle static files
 	r.Handle("/statics/{staticfile}",
 		http.StripPrefix("/statics/", http.FileServer(http.Dir("./statics"))),
 	).Methods("GET")
 
-	log.Fatal(http.ListenAndServe(":8080",
-		HandleMiddlewares(
-			r,
-			addRequestID(),
-			logRequest(),
-			setResponseHeaders(),
-		),
-	))
+	// all set, start the http handler
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
 type Invoice struct {
@@ -138,15 +128,13 @@ func (iv *invoicer) getInvoice(w http.ResponseWriter, r *http.Request) {
 	iv.db.Where("invoice_id = ?", i1.ID).Find(&i1.Charges)
 	jsonInvoice, err := json.Marshal(i1)
 	if err != nil {
-		httpError(w, r, http.StatusInternalServerError, "failed to retrieve invoice id %d: %s", vars["id"], err)
+		httpError(w, r, http.StatusInternalServerError, "failed to retrieve invoice id %s: %s", vars["id"], err)
 		return
 	}
 	w.Header().Add("Content-Type", "application/json")
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonInvoice)
-	al := appLog{Message: fmt.Sprintf("retrieved invoice %d", i1.ID), Action: "get-invoice"}
-	al.log(r)
 }
 
 func (iv *invoicer) postInvoice(w http.ResponseWriter, r *http.Request) {
@@ -170,10 +158,9 @@ func (iv *invoicer) postInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 	iv.db.Create(&i1)
 	iv.db.Last(&i1)
+	log.Printf("%+v\n", i1)
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(fmt.Sprintf("created invoice %d", i1.ID)))
-	al := appLog{Message: fmt.Sprintf("created invoice %d", i1.ID), Action: "post-invoice"}
-	al.log(r)
 }
 
 func (iv *invoicer) putInvoice(w http.ResponseWriter, r *http.Request) {
@@ -200,8 +187,6 @@ func (iv *invoicer) putInvoice(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%+v\n", i1)
 	w.WriteHeader(http.StatusAccepted)
 	w.Write([]byte(fmt.Sprintf("updated invoice %d", i1.ID)))
-	al := appLog{Message: fmt.Sprintf("updated invoice %d", i1.ID), Action: "put-invoice"}
-	al.log(r)
 }
 
 func (iv *invoicer) deleteInvoice(w http.ResponseWriter, r *http.Request) {
@@ -219,13 +204,11 @@ func (iv *invoicer) deleteInvoice(w http.ResponseWriter, r *http.Request) {
 	iv.db.Delete(&i1)
 	w.WriteHeader(http.StatusAccepted)
 	w.Write([]byte(fmt.Sprintf("deleted invoice %d", i1.ID)))
-	al := appLog{Message: fmt.Sprintf("deleted invoice %d", i1.ID), Action: "delete-invoice"}
-	al.log(r)
 }
 
 func (iv *invoicer) getIndex(w http.ResponseWriter, r *http.Request) {
-	log.Println("serving index page")
-	w.Header().Add("Content-Security-Policy", "default-src 'self';")
+	w.Header().Add("Content-Security-Policy", "default-src 'self'; child-src 'self;")
+	w.Header().Add("X-Frame-Options", "SAMEORIGIN")
 	w.Write([]byte(`
 <!DOCTYPE html>
 <html>
@@ -237,6 +220,8 @@ func (iv *invoicer) getIndex(w http.ResponseWriter, r *http.Request) {
     </head>
     <body>
 	<h1>Invoicer Web</h1>
+	<p><a href="/authenticate">Authenticate with Google</a></p>
+	</p>
         <p class="desc-invoice"></p>
         <div class="invoice-details">
         </div>
@@ -249,7 +234,6 @@ func (iv *invoicer) getIndex(w http.ResponseWriter, r *http.Request) {
         </form>
         <form id="invoiceDeleter" method="DELETE">
             <label>Delete this invoice</label>
-            <input type="hidden" name="CSRFToken" value="` + makeCSRFToken() + `">
             <input type="submit" />
         </form>
     </body>
@@ -263,10 +247,10 @@ func getHeartbeat(w http.ResponseWriter, r *http.Request) {
 // handleVersion returns the current version of the API
 func getVersion(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf(`{
-"source": "https://github.com/Securing-DevOps/invoicer",
+"source": "https://github.com/SusaOP/invoicer-chapter2",
 "version": "%s",
 "commit": "%s",
-"build": "https://circleci.com/gh/Securing-DevOps/invoicer/"
+"build": "https://circleci.com/gh/susaw/invoicer-chapter2/"
 }`, version, commit)))
 }
 
@@ -294,8 +278,8 @@ func checkCSRFToken(token string) bool {
 }
 
 var oauthCfg = &oauth2.Config{
-	ClientID:     "606479880714-v36tg6qtn9alsinbvfb0qtmvjdkunq4c.apps.googleusercontent.com",
-	ClientSecret: "ySBC6T-F31ez3qsA3lnNRvtr",
+	ClientID:     os.Getenv("OAUTH_CLIENT_ID"),
+	ClientSecret: os.Getenv("OAUTH_CLIENT_SECRET"),
 	RedirectURL:  "http://localhost:8080/oauth2callback",
 	Scopes:       []string{"https://www.googleapis.com/auth/userinfo.profile"},
 	Endpoint: oauth2.Endpoint{
