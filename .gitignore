@@ -1,4 +1,4 @@
 tmp/*
 .env
-
+payloads/*
 *.log
