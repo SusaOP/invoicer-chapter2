@@ -94,7 +94,14 @@ func main() {
 	).Methods("GET")
 
 	// all set, start the http handler
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Fatal(http.ListenAndServe(":8080",
+		HandleMiddlewares(
+			r,
+			addRequestID(),
+			logRequest(),
+			setResponseHeaders(),
+		),
+	))
 }
 
 type Invoice struct {
@@ -234,6 +241,7 @@ func (iv *invoicer) getIndex(w http.ResponseWriter, r *http.Request) {
         </form>
         <form id="invoiceDeleter" method="DELETE">
             <label>Delete this invoice</label>
+            <input type="hidden" name="CSRFToken" value="` + makeCSRFToken() + `">
             <input type="submit" />
         </form>
     </body>
