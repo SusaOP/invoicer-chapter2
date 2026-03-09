@@ -1,12 +1,13 @@
 module github.com/SusaOP/invoicer-chapter2
 
-go 1.24.2
+go 1.21
 
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/jinzhu/gorm v1.9.16
 	github.com/wader/gormstore v0.0.0-20251102195520-8e6187107356
 	go.mozilla.org/mozlog v0.0.0-20170222151521-4bb13139d403
+	golang.org/x/oauth2 v0.25.0
 )
 
 require (
