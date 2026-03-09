@@ -21,10 +21,13 @@ jobs:
             docker build -t ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME} .;
 
       - run:
+          name: Create Docker network
+          command: docker network create test-net
+
+      - run:
           name: Run application in background
           command: |
-            docker run ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME}
-          background: true
+            docker run --name invoicer-app --network test-net -d ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME}
 
       - run:
           name: ZAP baseline test of application
@@ -33,9 +36,9 @@ jobs:
           command: |
             (
             docker pull ghcr.io/zaproxy/zaproxy:latest && \
-            docker run -v $(pwd):/zap/wrk/:rw -u root -t ghcr.io/zaproxy/zaproxy:latest zap-baseline.py \
+            docker run --network test-net -v $(pwd):/zap/wrk/:rw -u root -t ghcr.io/zaproxy/zaproxy:latest zap-baseline.py \
                 -u https://raw.githubusercontent.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/master/zap-baseline.conf \
-                -t http://172.17.0.2:8080/ || \
+                -t http://invoicer-app:8080/ || \
             if [ $? -ne 1 ]; then exit 0; else exit 1; fi;
             )
 
